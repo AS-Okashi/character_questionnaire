@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="ASTERIA FILES — オリジナルキャラクターアーカイブ" />
+    <title>ASTERIA FILES — Character Archive</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="home-page">
+    <header class="site-header">
+      <a class="brand" href="index.html" aria-label="ASTERIA FILES ホーム">
+        <span class="brand-mark" aria-hidden="true">✦</span>
+        <span class="brand-copy"><strong>ASTERIA</strong><small>CHARACTER FILES</small></span>
+      </a>
+      <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="site-menu">MENU <span>＋</span></button>
+      <nav class="site-menu" id="site-menu" aria-label="メインメニュー">
+        <a href="#about">ABOUT</a>
+        <a href="#characters">CHARACTERS</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="home-hero section-shell" id="about">
+        <div class="hero-copy">
+          <p class="eyebrow">A DIGITAL CHARACTER ARCHIVE <span>／</span> 2026</p>
+          <h1>Find the light<br /><em>within.</em></h1>
+          <p class="hero-lead">それぞれの物語を抱えた、<br />10人のキャラクターファイル。</p>
+        </div>
+        <div class="hero-visual" aria-label="キャラクタービジュアル">
+          <div class="hero-orbit orbit-one"></div>
+          <div class="hero-orbit orbit-two"></div>
+          <span class="visual-note note-top">FILE NO. 001</span>
+          <span class="visual-note note-bottom">A STORY IN MOTION</span>
+          <div class="hero-image-frame">
+            <img src="assets/characters/asagiri-mio.png?v=20260810-costume1" alt="朝霧澪のイメージビジュアル" />
+          </div>
+          <div class="hero-stamp">A<br />F</div>
+        </div>
+      </section>
+
+      <section class="character-index section-shell" id="characters">
+        <div class="section-heading">
+          <div>
+            <div class="section-label"><span>01</span><i></i><span>CHARACTERS</span></div>
+            <h2>Meet the<br /><em>stars.</em></h2>
+          </div>
+          <p>名前をクリックすると、<br />それぞれのファイルが開きます。</p>
+        </div>
+        <div class="character-grid" id="character-grid" aria-live="polite"></div>
+      </section>
+
+    </main>
+
+    <footer class="site-footer section-shell">
+      <div class="footer-brand"><span class="brand-mark">✦</span><span>ASTERIA FILES</span></div>
+      <p>AN ORIGINAL CHARACTER ARCHIVE</p>
+      <small>© 2026 ASTERIA FILES. Mockup project.</small>
+    </footer>
+
+    <script src="scripts/characters.js?v=20260810-costume1"></script>
+    <script src="scripts/catalog.js?v=20260810-costume1"></script>
+  </body>
+</html>

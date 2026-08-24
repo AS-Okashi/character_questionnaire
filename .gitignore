@@ -1,0 +1,25 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Local working data
+gap/
+private/
+assets/
+
+# Archives
+*.tar.gz
+*.zip
+
+# Local development
+node_modules/
+.DS_Store
+
+source_image.png
