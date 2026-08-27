@@ -20,6 +20,7 @@
       <nav class="site-menu" id="site-menu" aria-label="メインメニュー">
         <a href="../index.html#about">ABOUT</a>
         <a href="../index.html#characters">CHARACTERS</a>
+        <a href="../survey/">SURVEY</a>
       </nav>
     </header>
 

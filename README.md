@@ -1,38 +1,60 @@
-# ASTERIA FILES
+# ASTERIA FILES + Research Survey
 
-オリジナルキャラクターアーカイブのモックサイトです。提供された立ち絵を仮ビジュアルとして使用し、10人分のキャラクター詳細ページを用意しています。
+オリジナルキャラクターアーカイブと、キャラクター衣装変化に関する印象評価アンケートをまとめた静的サイトです。既存のキャラクター紹介画面は維持し、`/survey/` を新規追加しています。
 
 ## 構成
 
 - `index.html` — キャラクター一覧とサイトトップ
 - `characters/*.html` — 各キャラクターの詳細ページ
-- `scripts/characters.js` — キャラクター情報のデータ
-- `scripts/character.js` — 詳細ページ共通テンプレート
-- `styles.css` — 共通デザインとレスポンシブスタイル
+- `scripts/characters.js` — キャラクター情報。アンケートでギャップを事前誘導しないよう、一部説明文を中立的に調整済み
+- `survey/` — アンケートUI・回答ロジック
+- `assets/survey/transforms/` — 3条件×10キャラクターの衣装変換画像置き場
+- `gas/Code.gs` — Google Apps Script送信先サンプル
+- `styles.css` — 既存サイト共通デザイン
 
-キャラクターを追加・差し替えするときは、まず`CHARACTERS`配列にデータと`image`パスを追加し、詳細ページのHTML入口を1つ追加してください。現在は10人すべて`assets/characters/`内の画像を参照しています。元のモック画像は`source_image.png`として参照用に残しています。
+## Survey flow
+
+```text
+研究説明・同意
+  ↓
+参加者属性
+  ↓
+PART 1: 10キャラクターの基準印象（I1〜I6）
+  ↓
+PART 2: 10キャラクターの衣装変化評価
+        変化後印象 I1〜I6
+        変化評価 G1〜G6
+        ギャップ萌え GM1〜GM3
+  ↓
+任意自由記述
+  ↓
+GASへ送信
+```
+
+参加者1人には各キャラクターにつき3変換条件のうち1枚だけを提示します。参加者IDから3群へランダム割当し、全体で各条件が概ね均等になる設計です。
+
+詳細は `survey/README.md` と `gas/Code.gs` を参照してください。
 
 ## GitHub Pages
 
-`master`ブランチへpushすると、`.github/workflows/pages.yml`が静的ファイルをGitHub Pagesへデプロイします。リポジトリのSettings → Pagesで、Sourceを`GitHub Actions`に設定してください。
+`master`ブランチへpushすると、`.github/workflows/pages.yml`がリポジトリ全体を静的ファイルとしてGitHub Pagesへデプロイします。Settings → Pages → Source は `GitHub Actions` に設定してください。
+
+`.nojekyll` を含むため、追加のビルド処理は不要です。
+
+## 公開前チェック
+
+- `assets/characters/` に10人の基準画像が存在する
+- `assets/survey/transforms/<id>/a.png|b.png|c.png` の30枚を配置する
+- `gas/Code.gs` の `SPREADSHEET_ID` を設定してGASをデプロイする
+- `survey/survey-config.js` の `gasEndpoint` に `/exec` URLを設定する
 
 ## ローカル確認
-
-Pythonを使う場合は、環境ルールに従い`uv run`経由で静的サーバーを起動します。
 
 ```bash
 bash start-local.sh
 ```
 
-`start-local.sh`がプロジェクトの場所を自動で特定するため、どのディレクトリから実行してもルートURLが使えます。手動で起動する場合は、プロジェクトルートを明示してください。
-8000番ポートが使用中の場合は、ポート番号を指定できます。
+起動後:
 
-```bash
-bash start-local.sh 8124
-```
-
-```bash
-uv run --directory /net/uekilab-nas06/23j5062_sugihara/chara_intro python -m http.server 8000 --directory /net/uekilab-nas06/23j5062_sugihara/chara_intro
-```
-
-その後、`http://localhost:8000/`を開いてください。
+- トップ: `http://localhost:8000/`
+- アンケート: `http://localhost:8000/survey/`

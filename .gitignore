@@ -12,7 +12,6 @@ wheels/
 # Local working data
 gap/
 private/
-assets/
 
 # Archives
 *.tar.gz
@@ -21,5 +20,11 @@ assets/
 # Local development
 node_modules/
 .DS_Store
+.pytest_cache/
+.ruff_cache/
+.cache/
+_site/
+*.log
 
+# Original reference image; published character assets live under assets/.
 source_image.png
