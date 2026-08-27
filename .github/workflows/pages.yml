@@ -1,19 +1,15 @@
 name: Deploy to GitHub Pages
-
 on:
   push:
-    branches: [master]
+    branches: [master, main]
   workflow_dispatch:
-
 permissions:
   contents: read
   pages: write
   id-token: write
-
 concurrency:
   group: pages
   cancel-in-progress: true
-
 jobs:
   deploy:
     environment:
@@ -23,7 +19,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Prepare static site
         run: |
           mkdir -p _site
@@ -38,15 +33,12 @@ jobs:
             --exclude 'uv.lock' \
             --exclude '.python-version' \
             --exclude 'start-local.sh'
-
       - name: Configure Pages
         uses: actions/configure-pages@v5
-
       - name: Upload static site
         uses: actions/upload-pages-artifact@v3
         with:
           path: _site
-
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
