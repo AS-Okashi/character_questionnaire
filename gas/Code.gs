@@ -65,7 +65,9 @@ function validatePayload_(p) {
 
 function postMessageResponse_(nonce, ok, message) {
   const data = JSON.stringify({ type: "asteria-gas-submit", nonce: String(nonce || ""), ok: Boolean(ok), message: String(message || "") });
-  return HtmlService.createHtmlOutput("<!doctype html><meta charset='utf-8'><script>window.parent.postMessage(" + data + ", '*');<\/script>");
+  return HtmlService
+    .createHtmlOutput("<!doctype html><meta charset='utf-8'><script>window.parent.postMessage(" + data + ", '*');<\/script>")
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
 function ensureSheets_(ss) {
