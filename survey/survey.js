@@ -4,6 +4,7 @@
   const CONFIG = window.SURVEY_CONFIG || {};
   const CHARACTERS = window.CHARACTERS || [];
   const STORAGE_KEY = `asteria-survey:${CONFIG.surveyVersion || "v1"}`;
+  const SUBMITTED_KEY = `${STORAGE_KEY}:submitted`;
   const app = document.getElementById("survey-app");
   const progressPart = document.getElementById("progress-part");
   const progressCount = document.getElementById("progress-count");
@@ -27,8 +28,8 @@
     ["G6", "衣装変更後の姿に違和感を感じた"]
   ];
 
-  const GAP_MOE_ITEMS = [
-    ["GM1", "この衣装変化にギャップ萌えを感じた"],
+  const PRIMARY_GAP_MOE_ITEM = [["GM1", "この衣装変化にギャップ萌えを感じた"]];
+  const AUX_GAP_MOE_ITEMS = [
     ["GM2", "元の印象との違いそのものに魅力を感じた"],
     ["GM3", "このキャラクターの意外な一面に惹かれた"]
   ];
@@ -53,11 +54,6 @@
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     return [...bytes].map((b, i) => `${[4,6,8,10].includes(i) ? "-" : ""}${b.toString(16).padStart(2, "0")}`).join("");
   }
-  function hashString(value) {
-    let hash = 2166136261;
-    for (let i = 0; i < value.length; i += 1) { hash ^= value.charCodeAt(i); hash = Math.imul(hash, 16777619); }
-    return hash >>> 0;
-  }
   function shuffled(values) {
     const a = [...values];
     for (let i = a.length - 1; i > 0; i -= 1) {
@@ -73,28 +69,48 @@
   }
   function newState() {
     const participantId = uuid();
-    const assignmentGroup = hashString(participantId) % 3;
     const baselineOrder = shuffled(CHARACTERS.map((c) => c.id));
     let transformOrder = shuffled(CHARACTERS.map((c) => c.id));
     if (transformOrder[0] === baselineOrder[baselineOrder.length - 1] && transformOrder.length > 1) {
       [transformOrder[0], transformOrder[1]] = [transformOrder[1], transformOrder[0]];
     }
     return {
-      schema_version: "2.0",
+      schema_version: "2.1",
       survey_version: CONFIG.surveyVersion || "v1",
       participant_id: participantId,
-      assignment_group: assignmentGroup,
-      assignment: buildAssignment(assignmentGroup),
+      assignment_group: null,
+      assignment: {},
       started_at: nowIso(), completed_at: null, submitted_at: null,
-      current_screen: "consent", baseline_index: 0, transform_index: 0, transform_subphase: "core",
+      current_screen: "consent", baseline_index: 0, transform_index: 0, transform_subphase: "gm1",
       baseline_order: baselineOrder, transform_order: transformOrder,
       demographics: {}, baseline: {}, transform: {}, open_response: {}, screen_events: []
     };
   }
   function saveState(s) { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); }
+  function submittedState(marker) {
+    return {
+      schema_version: "2.1", survey_version: marker.survey_version || CONFIG.surveyVersion || "v1",
+      participant_id: marker.participant_id || "", submitted_at: marker.submitted_at || null,
+      current_screen: "complete", assignment_group: marker.assignment_group ?? null,
+      baseline: {}, transform: {}, screen_events: []
+    };
+  }
   function loadState() {
-    try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch (_) {}
+    try {
+      const markerRaw = localStorage.getItem(SUBMITTED_KEY);
+      if (markerRaw) return submittedState(JSON.parse(markerRaw));
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch (_) {}
     const s = newState(); saveState(s); return s;
+  }
+  function markSubmittedAndClearDetailedState(s) {
+    const marker = {
+      participant_id: s.participant_id, survey_version: s.survey_version,
+      assignment_group: s.assignment_group, submitted_at: s.submitted_at || nowIso()
+    };
+    localStorage.setItem(SUBMITTED_KEY, JSON.stringify(marker));
+    localStorage.removeItem(STORAGE_KEY);
   }
 
   let state = loadState();
@@ -143,6 +159,55 @@
     });
   }
 
+  function isTrustedGasOrigin(origin) {
+    try {
+      const url = new URL(origin);
+      return url.protocol === "https:" && (
+        url.hostname === "script.google.com" ||
+        url.hostname === "script.googleusercontent.com" ||
+        url.hostname.endsWith(".googleusercontent.com")
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function requestAssignmentFromGas(participantId) {
+    return new Promise((resolve, reject) => {
+      const endpoint = String(CONFIG.gasEndpoint || "").trim();
+      if (!endpoint) { reject(new Error("GAS_ENDPOINT_NOT_CONFIGURED")); return; }
+      const iframe = document.getElementById("gas-submit-target"), form = document.createElement("form"), nonce = uuid();
+      form.method = "GET"; form.action = endpoint; form.target = "gas-submit-target"; form.style.display = "none";
+      for (const [name, value] of [["action","assign"],["participant_id",participantId],["nonce",nonce]]) {
+        const input = document.createElement("input"); input.type = "hidden"; input.name = name; input.value = value; form.appendChild(input);
+      }
+      document.body.appendChild(form);
+      let done = false;
+      const cleanup = () => { window.removeEventListener("message", onMessage); form.remove(); };
+      const timeout = setTimeout(() => { if (done) return; done = true; cleanup(); reject(new Error("GAS_ASSIGNMENT_TIMEOUT")); }, 20000);
+      const onMessage = (event) => {
+        const data = event.data;
+        if (!isTrustedGasOrigin(event.origin) || !data || data.type !== "asteria-gas-assignment" || data.nonce !== nonce || done) return;
+        done = true; clearTimeout(timeout); cleanup();
+        if (!data.ok || ![0,1,2].includes(Number(data.assignment_group))) { reject(new Error(data.message || "GAS_ASSIGNMENT_FAILED")); return; }
+        resolve(Number(data.assignment_group));
+      };
+      window.addEventListener("message", onMessage);
+      try { form.submit(); } catch (error) { clearTimeout(timeout); cleanup(); reject(error); }
+    });
+  }
+  async function ensureAssignment() {
+    if (state.assignment_group !== null && state.assignment_group !== undefined && [0,1,2].includes(Number(state.assignment_group))) {
+      state.assignment_group = Number(state.assignment_group);
+      state.assignment = buildAssignment(state.assignment_group);
+      return;
+    }
+    const group = await requestAssignmentFromGas(state.participant_id);
+    state.assignment_group = group;
+    state.assignment = buildAssignment(group);
+    saveState(state);
+  }
+
   function renderConsent() {
     state.current_screen = "consent"; saveState(state); setProgress("INTRO", "", 2);
     card(`<p class="survey-kicker">RESEARCH SURVEY / 2026</p><h1 class="survey-title">キャラクター衣装変化に関する<br />印象評価アンケート</h1>
@@ -152,7 +217,16 @@
       <div class="survey-actions"><button class="survey-button" id="next" disabled>アンケートを開始</button></div>`);
     const check = document.getElementById("consent"), next = document.getElementById("next");
     check.addEventListener("change", () => next.disabled = !check.checked);
-    next.addEventListener("click", () => { recordScreenExit("consent"); state.current_screen = "demographics"; saveState(state); render(); });
+    next.addEventListener("click", async () => {
+      next.disabled = true; next.textContent = "割当を準備中…";
+      try {
+        await ensureAssignment();
+        recordScreenExit("consent"); state.current_screen = "demographics"; saveState(state); render();
+      } catch (error) {
+        next.disabled = false; next.textContent = "アンケートを開始";
+        alert("参加条件の割当を取得できませんでした。通信環境を確認して、もう一度お試しください。");
+      }
+    });
   }
 
   function renderDemographics() {
@@ -197,7 +271,7 @@
   function renderPart2Intro() {
     state.current_screen = "part2-intro"; saveState(state); setProgress("PART 2", "OUTFIT TRANSFORMATION", 43);
     card(`<p class="survey-kicker">PART 2 / OUTFIT TRANSFORMATION</p><h1 class="survey-title">衣装変更後の印象を<br />評価してください</h1><p class="survey-lead">元の姿と衣装変更後の姿を見比べ、衣装変更後のキャラクターから受ける印象と、その変化について回答してください。</p><div class="survey-note"><strong>「ギャップ萌え」について：</strong><br />本調査では、先に抱いたキャラクターの印象とは異なる一面に対して魅力を感じること、という意味で用います。衣装の変化が大きいほどギャップ萌えである、という意味ではありません。</div><div class="survey-actions"><button class="survey-button" id="next">PART 2 を開始</button></div>`);
-    document.getElementById("next").addEventListener("click", () => { recordScreenExit("part2-intro"); state.current_screen = "transform"; state.transform_subphase = "core"; saveState(state); render(); });
+    document.getElementById("next").addEventListener("click", () => { recordScreenExit("part2-intro"); state.current_screen = "transform"; state.transform_subphase = "gm1"; saveState(state); render(); });
   }
 
   function compareHeader(character, transformedSrc) {
@@ -208,22 +282,57 @@
     const index = state.transform_index;
     if (index >= state.transform_order.length) { state.current_screen = "open-response"; saveState(state); render(); return; }
     const character = characterById(state.transform_order[index]), variant = state.assignment[character.id];
+    if (!VARIANTS.includes(variant)) {
+      alert("参加条件の割当を確認できません。ページを再読み込みしてください。");
+      return;
+    }
     const transformedSrc = CONFIG.transformImagePath ? CONFIG.transformImagePath(character.id, variant) : `../assets/survey/transforms/${character.id}/${variant}.png`;
     const baseProgress = 45 + (index / 10) * 43;
-    setProgress("PART 2", `${String(index + 1).padStart(2,"0")} / 10`, baseProgress + (state.transform_subphase === "factors" ? 3.5 : 0));
+    const phaseProgress = state.transform_subphase === "gm1" ? 0 : state.transform_subphase === "core" ? 1.8 : 3.5;
+    setProgress("PART 2", `${String(index + 1).padStart(2,"0")} / 10`, baseProgress + phaseProgress);
 
     if (state.transform_subphase === "factors") { renderFactorPhase(character, variant, transformedSrc, index); return; }
+    if (state.transform_subphase === "core") { renderCorePhase(character, variant, transformedSrc, index); return; }
+    renderPrimaryGapMoePhase(character, variant, transformedSrc, index);
+  }
 
+  function renderPrimaryGapMoePhase(character, variant, transformedSrc, index) {
+    card(`${compareHeader(character, transformedSrc)}
+      <div class="question-block"><p class="survey-kicker">FIRST IMPRESSION</p><h2>まず、この衣装変化を見て感じた「ギャップ萌え」の程度を回答してください。</h2><p>この回答を確定した後、印象や衣装変化について詳しく回答します。</p>${likertHtml(PRIMARY_GAP_MOE_ITEM, `tr-gm1-${character.id}`)}</div>
+      <div class="survey-actions"><button class="survey-button" id="next">ギャップ萌え評価を確定して次へ</button></div>`);
+    bindImageFallbacks();
+    document.getElementById("next").addEventListener("click", () => {
+      const gm1 = collectLikert(PRIMARY_GAP_MOE_ITEM, `tr-gm1-${character.id}`);
+      if (!gm1) { alert("ギャップ萌えの程度を回答してください。"); return; }
+      state.transform[character.id] = {
+        character_id: character.id, variant_id: variant, order_index: index,
+        impressions: null, changes: null, gap_moe: { GM1: gm1.GM1 },
+        gm1_shown_at: new Date(screenShownAt).toISOString(), gm1_answered_at: nowIso(), gm1_duration_ms: Date.now() - screenShownAt,
+        core_shown_at: null, core_answered_at: null, core_duration_ms: null, garment_factors: null
+      };
+      recordScreenExit(`transform-gm1:${character.id}`); state.transform_subphase = "core"; saveState(state); render();
+    });
+  }
+
+  function renderCorePhase(character, variant, transformedSrc, index) {
+    const item = state.transform[character.id];
+    if (!item || !item.gap_moe || !Number.isInteger(item.gap_moe.GM1)) {
+      state.transform_subphase = "gm1"; saveState(state); render(); return;
+    }
     card(`${compareHeader(character, transformedSrc)}
       <div class="question-block"><h2>衣装変更後のキャラクターについて回答してください。</h2><p>衣装変更後の姿から現在受ける印象として回答してください。</p>${likertHtml(IMPRESSION_ITEMS, `tr-imp-${character.id}`)}</div>
       <div class="question-block"><h2>衣装の変化について回答してください。</h2>${likertHtml(CHANGE_ITEMS, `tr-change-${character.id}`)}</div>
-      <div class="question-block"><h2>この衣装変化から感じた魅力について回答してください。</h2>${likertHtml(GAP_MOE_ITEMS, `tr-gap-${character.id}`)}</div>
+      <div class="question-block"><h2>この衣装変化から感じた魅力について、補助的な2項目に回答してください。</h2>${likertHtml(AUX_GAP_MOE_ITEMS, `tr-gap-aux-${character.id}`)}</div>
       <div class="survey-actions"><button class="survey-button" id="next">全体評価を確定して次へ</button></div>`);
     bindImageFallbacks();
     document.getElementById("next").addEventListener("click", () => {
-      const impressions = collectLikert(IMPRESSION_ITEMS, `tr-imp-${character.id}`), changes = collectLikert(CHANGE_ITEMS, `tr-change-${character.id}`), gapMoe = collectLikert(GAP_MOE_ITEMS, `tr-gap-${character.id}`);
-      if (!impressions || !changes || !gapMoe) { alert("すべての項目に回答してください。"); return; }
-      state.transform[character.id] = { character_id:character.id, variant_id:variant, order_index:index, impressions, changes, gap_moe:gapMoe, core_shown_at:new Date(screenShownAt).toISOString(), core_answered_at:nowIso(), core_duration_ms:Date.now()-screenShownAt, garment_factors:null };
+      const impressions = collectLikert(IMPRESSION_ITEMS, `tr-imp-${character.id}`);
+      const changes = collectLikert(CHANGE_ITEMS, `tr-change-${character.id}`);
+      const gapAux = collectLikert(AUX_GAP_MOE_ITEMS, `tr-gap-aux-${character.id}`);
+      if (!impressions || !changes || !gapAux) { alert("すべての項目に回答してください。"); return; }
+      item.impressions = impressions; item.changes = changes;
+      item.gap_moe = { GM1: item.gap_moe.GM1, GM2: gapAux.GM2, GM3: gapAux.GM3 };
+      item.core_shown_at = new Date(screenShownAt).toISOString(); item.core_answered_at = nowIso(); item.core_duration_ms = Date.now() - screenShownAt;
       recordScreenExit(`transform-core:${character.id}`); state.transform_subphase = "factors"; saveState(state); render();
     });
   }
@@ -290,7 +399,7 @@
       if (!item) { alert("全体評価データを確認できません。ページを再読み込みしてください。"); return; }
       item.garment_factors = { selected: selected.includes("none") ? [] : selected, none_selected:selected.includes("none"), effects, factor_shown_at:new Date(screenShownAt).toISOString(), factor_answered_at:nowIso(), factor_duration_ms:Date.now()-screenShownAt };
       item.answered_at = nowIso();
-      recordScreenExit(`transform-factors:${character.id}`); state.transform_index += 1; state.transform_subphase = "core"; saveState(state); render();
+      recordScreenExit(`transform-factors:${character.id}`); state.transform_index += 1; state.transform_subphase = "gm1"; saveState(state); render();
     });
   }
 
@@ -321,7 +430,7 @@
       let done=false;
       const cleanup=()=>{window.removeEventListener("message",onMessage);form.remove();};
       const timeout=setTimeout(()=>{if(done)return;done=true;cleanup();reject(new Error("GAS_SUBMIT_TIMEOUT"));},20000);
-      const onMessage=(event)=>{const data=event.data;if(!data||data.type!=="asteria-gas-submit"||data.nonce!==nonce||done)return;done=true;clearTimeout(timeout);cleanup();data.ok?resolve():reject(new Error(data.message||"GAS_SUBMIT_FAILED"));};
+      const onMessage=(event)=>{const data=event.data;if(!isTrustedGasOrigin(event.origin)||!data||data.type!=="asteria-gas-submit"||data.nonce!==nonce||done)return;done=true;clearTimeout(timeout);cleanup();data.ok?resolve(data.message||"ok"):reject(new Error(data.message||"GAS_SUBMIT_FAILED"));};
       window.addEventListener("message",onMessage); try{form.submit();}catch(error){clearTimeout(timeout);cleanup();reject(error);}
     });
   }
@@ -334,11 +443,11 @@
       const button=event.currentTarget;
       if(Object.keys(state.baseline).length!==10||Object.values(state.transform).filter(x=>x?.garment_factors).length!==10){alert("必須回答が不足しています。");return;}
       button.disabled=true;button.textContent="送信中…";state.completed_at=nowIso();saveState(state);const payload=buildPayload();
-      try{await submitToGas(payload);state.submitted_at=nowIso();state.current_screen="complete";saveState(state);render();}
+      try{await submitToGas(payload);state.submitted_at=nowIso();state.current_screen="complete";markSubmittedAndClearDetailedState(state);render();}
       catch(error){button.disabled=false;button.textContent="回答を送信";const holder=document.getElementById("fallback-download");holder.innerHTML=`<p class="submit-warning">送信を確認できませんでした。通信環境またはGAS設定を確認してください。</p>`;holder.appendChild(createLocalDownload(payload));}
     });
   }
-  function renderComplete() { setProgress("COMPLETE","THANK YOU",100); card(`<p class="survey-kicker">SURVEY COMPLETE</p><h1 class="survey-title">ご協力<br />ありがとうございました</h1><p class="survey-lead">回答の送信が完了しました。本調査では、キャラクターについて形成された印象、具体的な服装変換要因、衣装変化に対する心理反応とギャップ萌えとの関係を研究します。</p><div class="survey-note">このブラウザには送信済みの状態が保存されています。</div>`); }
+  function renderComplete() { setProgress("COMPLETE","THANK YOU",100); card(`<p class="survey-kicker">SURVEY COMPLETE</p><h1 class="survey-title">ご協力<br />ありがとうございました</h1><p class="survey-lead">回答の送信が完了しました。本調査では、キャラクターについて形成された印象、具体的な服装変換要因、衣装変化に対する心理反応とギャップ萌えとの関係を研究します。</p><div class="survey-note">このブラウザには再送防止のため、送信済み状態と参加者IDなど、再送防止に必要な最小限の情報だけが保存されています。</div>`); }
 
   function render() {
     screenShownAt=Date.now();

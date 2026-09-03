@@ -1,5 +1,5 @@
 window.SURVEY_CONFIG = {
-  surveyVersion: "2026.08.26-final-v2",
+  surveyVersion: "2026.09.03-method-fixes-v3",
   // GASをウェブアプリとしてデプロイ後、/exec URLを設定してください。
   gasEndpoint: "https://script.google.com/macros/s/AKfycbyLQbmx9TOjwkM9IIZDur-6cRJvnONW4v3Iw-zXo5lB_dxZjMFEdrN6XSxNDQtMjsI/exec",
   requireGasEndpointForFinalSubmit: true,
