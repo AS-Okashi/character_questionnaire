@@ -125,7 +125,15 @@
   function ageValue(character) { return character.stats?.find(([key]) => key === "AGE")?.[1] || "—"; }
   function escapeHtml(value) { return String(value ?? "").replace(/[&<>'"]/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[ch])); }
   function setProgress(part, count, value) { progressPart.textContent = part; progressCount.textContent = count || ""; progressBar.style.width = `${Math.max(0, Math.min(100, value))}%`; }
-  function card(inner) { app.innerHTML = `<section class="survey-card">${inner}</section>`; window.scrollTo(0, 0); }
+  let disposeComparisonLayout = () => {};
+
+  function card(inner) {
+    disposeComparisonLayout();
+    disposeComparisonLayout = () => {};
+    app.classList.remove("survey-shell--comparison");
+    app.innerHTML = `<section class="survey-card">${inner}</section>`;
+    window.scrollTo(0, 0);
+  }
 
   function likertHtml(items, prefix, anchors = ["1 まったくそう思わない", "4 どちらともいえない", "7 非常にそう思う"]) {
     return items.map(([id, text]) => `
@@ -342,6 +350,43 @@
       ${characterProfileHtml(character)}`;
   }
 
+  function renderComparisonCard(character, transformedSrc, questionsHtml) {
+    card(`
+      <div class="comparison-layout">
+        <section class="comparison-reference"
+          aria-label="比較画像とキャラクタープロフィール">
+          ${compareHeader(character, transformedSrc)}
+        </section>
+        <div class="comparison-questions">
+          ${questionsHtml}
+        </div>
+      </div>
+    `);
+    app.classList.add("survey-shell--comparison");
+
+    const panel = app.querySelector(".comparison-reference");
+    const desktop = window.matchMedia("(min-width: 1100px)");
+
+    function updateStickyState() {
+      const fitsViewport =
+        panel.getBoundingClientRect().height <= window.innerHeight - 40;
+      panel.classList.toggle(
+        "is-sticky",
+        desktop.matches && fitsViewport
+      );
+    }
+
+    const observer = new ResizeObserver(updateStickyState);
+    observer.observe(panel);
+    window.addEventListener("resize", updateStickyState);
+    updateStickyState();
+
+    disposeComparisonLayout = () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updateStickyState);
+    };
+  }
+
   function renderTransform() {
     const index = state.transform_index;
     if (index >= state.transform_order.length) { state.current_screen = "open-response"; saveState(state); render(); return; }
@@ -361,7 +406,7 @@
   }
 
   function renderPrimaryGapMoePhase(character, variant, transformedSrc, index) {
-    card(`${compareHeader(character, transformedSrc)}
+    renderComparisonCard(character, transformedSrc, `
       <div class="question-block"><p class="survey-kicker">FIRST IMPRESSION</p><h2>まず、この衣装変化を見て感じた「ギャップ萌え」の程度を回答してください。</h2><p>この回答を確定した後、印象や衣装変化について詳しく回答します。</p>${likertHtml(PRIMARY_GAP_MOE_ITEM, `tr-gm1-${character.id}`)}</div>
       <div class="survey-actions"><button class="survey-button" id="next">ギャップ萌え評価を確定して次へ</button></div>`);
     bindImageFallbacks();
@@ -383,7 +428,7 @@
     if (!item || !item.gap_moe || !Number.isInteger(item.gap_moe.GM1)) {
       state.transform_subphase = "gm1"; saveState(state); render(); return;
     }
-    card(`${compareHeader(character, transformedSrc)}
+    renderComparisonCard(character, transformedSrc, `
       <div class="question-block"><h2>衣装変更後のキャラクターについて回答してください。</h2><p>衣装変更後の姿から現在受ける印象として回答してください。</p>${likertHtml(IMPRESSION_ITEMS, `tr-imp-${character.id}`)}</div>
       <div class="question-block"><h2>衣装の変化について回答してください。</h2>${likertHtml(CHANGE_ITEMS, `tr-change-${character.id}`)}</div>
       <div class="question-block"><h2>この衣装変化から感じた魅力について、補助的な2項目に回答してください。</h2>${likertHtml(AUX_GAP_MOE_ITEMS, `tr-gap-aux-${character.id}`)}</div>
@@ -419,7 +464,7 @@
   }
 
   function renderFactorPhase(character, variant, transformedSrc, index) {
-    card(`${compareHeader(character, transformedSrc)}
+    renderComparisonCard(character, transformedSrc, `
       <div class="question-block"><p class="survey-kicker">GARMENT TRANSFORMATION FACTORS</p><h2>具体的に、服装のどの要素が変化したと感じましたか。</h2><p>先ほどの全体的な印象評価は確定済みです。ここでは、元の衣装と比較して変化を感じた服装要素をすべて選択してください。</p>${factorSelectorHtml()}</div>
       <div class="question-block"><h2>選択した要素が「ギャップ萌え」に与えた影響を回答してください。</h2><p>変化が大きかったかではなく、その要素の変化がギャップ萌えを高めた／弱めた方向を評価してください。</p><div id="factor-ratings"></div></div>
       <div class="survey-actions"><button class="survey-button" id="next">服装要因を確定して次のキャラクターへ</button></div>`);
