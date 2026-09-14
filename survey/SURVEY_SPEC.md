@@ -6,7 +6,7 @@
 3. 参加者属性
 4. PART 1: 基準キャラクター10人の印象 I1–I6
 5. PART 2: 各キャラクターについて以下を実施
-   - 元画像＋衣装変更後画像を提示
+   - 元画像＋衣装変更後画像と、PART 1と同一のプロフィールを提示
    - **GM1（Primary Outcome）を最初に単独で取得・確定**
    - 変化後印象 I1–I6
    - 心理評価 G1–G6
@@ -19,7 +19,24 @@
 8. 送信成功後、詳細回答をlocalStorageから削除
 9. 終了
 
-GM1はI/G等の詳細質問による誘導を抑えるため、画像ペアを見た直後に取得する。服装要因名はI/G/GM回答を確定するまで表示せず、具体的な服装観点によるプライミングを抑える。
+GM1は、各キャラクターのI/G等の詳細質問に先立って単独取得する。
+服装要因名は、そのキャラクターのI/G/GM回答を確定するまで表示しない。
+前のキャラクターで提示した質問による影響まで排除する設計ではない。
+
+## Stimulus presentation
+- 基準画像・衣装変更後画像は2:3の表示枠にcontainで全体表示する。
+- プロフィールは紹介文・年齢・趣味・特技・好きなものとする。
+- PART 1とPART 2で共通の描画関数を使用する。
+- PART 2のGM1・詳細評価・服装要因の全画面で同一プロフィールを再掲する。
+- 過去に回答した印象評定値は再表示しない。
+- 画像を提示する各画面では、全画像の読み込み・デコード完了と
+  描画機会を待ってから、回答欄と次へボタンを有効化する。
+- 画像の読み込みに失敗した場合は、回答を確定できない。
+- shown_at、gm1_shown_at、core_shown_at、factor_shown_atは
+  回答を有効化した時刻とする。
+- duration_ms等は、その時刻から回答確定までの経過時間であり、
+  プロフィールの確認・スクロール・中断も含む。
+- 同じ画面を再読み込みした場合は、再表示後の時刻から計測し直す。
 
 ## I: Impression
 - I1 かわいい
@@ -89,6 +106,11 @@ GM1は`transform[].gap_moe.GM1`に従来通り保存し、取得タイミング�
 GASでは `GarmentFactors` に各参加者×キャラクター×variant×F1–F7を1行ずつ保存し、未選択要因も `selected=false` として保持する。
 
 ## GAS integrity / retry model
+- 自由記述の確定後、送信画面へ初めて進んだ時点でcompleted_atと
+  送信用JSON文字列を固定し、ブラウザのstateに保存する。
+- 再送・ページ再読み込み後も同じJSON文字列を送信する。
+- 通信確認用nonceはリクエストごとに更新し、回答payloadには含めない。
+- 保存用JSONダウンロードも、送信するJSON文字列と同じ内容とする。
 - `RawResponses`をcanonical sourceとする。
 - `SubmissionStatus`で`normalizing / complete / error`を管理する。
 - derived sheets（Participants / BaselineRatings / TransformRatings / GarmentFactors / OpenResponses）はparticipant_id単位で削除して再構築できるため、途中保存に失敗しても同じpayloadを再送すれば回復できる。
@@ -98,3 +120,7 @@ GASでは `GarmentFactors` に各参加者×キャラクター×variant×F1–F7
 
 ## Browser local storage
 送信前は途中再開のため回答詳細をlocalStorageに保存する。GASが送信成功を返した後は、年齢・性別・評定・自由記述等を削除し、再送防止用の`participant_id`、survey version、assignment group、submitted_atのみを残す。
+
+再送用のsubmission_payload_jsonも、送信成功後に詳細回答と一緒に削除する。
+survey versionを更新すると旧版の途中回答・送信済みマーカーは読み込まない。
+旧版データを新版へ自動移行したり、削除したりはしない。

@@ -150,13 +150,52 @@
     return `<div class="${className}" data-image-wrap><img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}" data-fallback-image /><div class="image-missing">${escapeHtml(missingText)}</div></div>`;
   }
   function bindImageFallbacks() {
-    document.querySelectorAll("[data-fallback-image]").forEach((img) => {
-      img.addEventListener("error", () => {
-        img.closest("[data-image-wrap]")?.classList.add("is-missing");
-        const next = document.getElementById("next");
-        if (next) { next.disabled = true; next.textContent = "画像の配置を確認してください"; }
-      }, { once: true });
-    });
+    const images = [...app.querySelectorAll("[data-fallback-image]")];
+    const next = document.getElementById("next");
+    if (!next || !images.length) return;
+
+    const nextLabel = next.textContent;
+    const controls = [
+      ...app.querySelectorAll("input, select, textarea, button")
+    ].map((control) => [control, control.disabled]);
+
+    controls.forEach(([control]) => { control.disabled = true; });
+    next.textContent = "画像を読み込み中…";
+    app.setAttribute("aria-busy", "true");
+
+    Promise.all(images.map(async (img) => {
+      try {
+        await img.decode();
+        if (!img.naturalWidth || !img.naturalHeight) {
+          throw new Error("IMAGE_NOT_AVAILABLE");
+        }
+      } catch (error) {
+        if (img.isConnected) {
+          img.closest("[data-image-wrap]")?.classList.add("is-missing");
+        }
+        throw error;
+      }
+    }))
+      .then(() => new Promise((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(resolve));
+      }))
+      .then(() => {
+        // 古い画面の非同期処理で、新しい画面を変更しない。
+        if (!next.isConnected) return;
+
+        screenShownAt = Date.now();
+        controls.forEach(([control, wasDisabled]) => {
+          control.disabled = wasDisabled;
+        });
+        next.textContent = nextLabel;
+        app.removeAttribute("aria-busy");
+      })
+      .catch(() => {
+        if (!next.isConnected) return;
+        next.textContent = "画像を読み込めませんでした。再読み込みしてください";
+        app.removeAttribute("aria-busy");
+        // 回答欄と次へボタンは無効のままにする。
+      });
   }
 
   function isTrustedGasOrigin(origin) {
@@ -251,6 +290,26 @@
     document.getElementById("next").addEventListener("click", () => { recordScreenExit("part1-intro"); state.current_screen = "baseline"; saveState(state); render(); });
   }
 
+  function characterProfileHtml(character) {
+    const fields = [
+      ["AGE", ageValue(character)],
+      ["HOBBY", detailValue(character, "HOBBY")],
+      ["SPECIALTY", detailValue(character, "SPECIALTY")],
+      ["LIKES", detailValue(character, "LIKES")]
+    ];
+
+    return `<div class="character-profile">
+      <p>${escapeHtml(character.intro)}</p>
+      <div class="profile-tags">
+        ${fields.map(([label, value]) => `
+          <div>
+            <span>${escapeHtml(label)}</span>
+            <strong>${escapeHtml(value)}</strong>
+          </div>`).join("")}
+      </div>
+    </div>`;
+  }
+
   function renderBaseline() {
     const index = state.baseline_index;
     if (index >= state.baseline_order.length) { state.current_screen = "part2-intro"; saveState(state); render(); return; }
@@ -258,7 +317,7 @@
     setProgress("PART 1", `${String(index + 1).padStart(2,"0")} / 10`, 10 + ((index + 1) / 10) * 30);
     card(`<div class="character-stage"><div class="character-panel">${imageWithFallback(`../${character.image}`, `${character.name}の基準画像`, "基準画像が見つかりません。assets/characters/ の画像配置を確認してください。")}
       <div class="character-idline"><span>FILE ${character.number}</span><span>${character.unit}</span></div><h1 class="character-name">${escapeHtml(character.name)}</h1><p class="character-kana">${escapeHtml(character.kana)} / ${escapeHtml(character.roman)}</p>
-      <div class="character-profile"><p>${escapeHtml(character.intro)}</p><div class="profile-tags"><div><span>AGE</span><strong>${escapeHtml(ageValue(character))}</strong></div><div><span>HOBBY</span><strong>${escapeHtml(detailValue(character,"HOBBY"))}</strong></div><div><span>SPECIALTY</span><strong>${escapeHtml(detailValue(character,"SPECIALTY"))}</strong></div><div><span>LIKES</span><strong>${escapeHtml(detailValue(character,"LIKES"))}</strong></div></div></div></div>
+      ${characterProfileHtml(character)}</div>
       <div><p class="survey-kicker">BASELINE IMPRESSION / ${character.number}</p><div class="question-block"><h2>このキャラクターについて、現在感じている印象を回答してください。</h2><p>1〜7の中から、最も近いものを選択してください。</p>${likertHtml(IMPRESSION_ITEMS, `base-${character.id}`)}</div><div class="survey-actions"><button class="survey-button" id="next">回答を確定して次へ</button></div></div></div>`);
     bindImageFallbacks();
     document.getElementById("next").addEventListener("click", () => {
@@ -274,8 +333,13 @@
     document.getElementById("next").addEventListener("click", () => { recordScreenExit("part2-intro"); state.current_screen = "transform"; state.transform_subphase = "gm1"; saveState(state); render(); });
   }
 
-  function compareHeader(character, transformedSrc) {
+  function compareImagesHtml(character, transformedSrc) {
     return `<p class="survey-kicker">OUTFIT EVALUATION / ${character.number}</p><h1 class="character-name">${escapeHtml(character.name)}</h1><p class="character-kana">${escapeHtml(character.kana)} / ${escapeHtml(character.roman)}</p><div class="compare-stage" style="margin-top:26px"><div><div class="compare-label"><span>REFERENCE</span><span>元の姿</span></div>${imageWithFallback(`../${character.image}`, `${character.name}の元画像`, "元画像が見つかりません。", "compare-image")}</div><div><div class="compare-label"><span>OUTFIT CHANGE</span><span>衣装変更後</span></div>${imageWithFallback(transformedSrc, `${character.name}の衣装変更後画像`, "衣装変更後画像が未配置です。assets/survey/transforms/ を確認してください。", "compare-image")}</div></div>`;
+  }
+
+  function compareHeader(character, transformedSrc) {
+    return `${compareImagesHtml(character, transformedSrc)}
+      ${characterProfileHtml(character)}`;
   }
 
   function renderTransform() {
@@ -416,16 +480,28 @@
   function buildPayload() {
     return { schema_version:state.schema_version, survey_version:state.survey_version, participant_id:state.participant_id, assignment_group:state.assignment_group, started_at:state.started_at, completed_at:state.completed_at||nowIso(), demographics:state.demographics, baseline_order:state.baseline_order, transform_order:state.transform_order, baseline:state.baseline_order.map((id)=>state.baseline[id]), transform:state.transform_order.map((id)=>state.transform[id]), open_response:state.open_response, screen_events:state.screen_events, user_agent:navigator.userAgent };
   }
-  function createLocalDownload(payload) {
-    const blob = new Blob([JSON.stringify(payload,null,2)], {type:"application/json"}), url = URL.createObjectURL(blob), a=document.createElement("a");
+  function getSubmissionPayloadJson() {
+    if (!state.submission_payload_json) {
+      state.completed_at = state.completed_at || nowIso();
+      state.submission_payload_json = JSON.stringify(buildPayload());
+    }
+
+    // 保存できたことを確認してから、送信に使用する。
+    // 再読み込み後も、この文字列をそのまま再利用する。
+    saveState(state);
+    return state.submission_payload_json;
+  }
+
+  function createLocalDownload(payloadJson) {
+    const blob = new Blob([payloadJson], {type:"application/json"}), url = URL.createObjectURL(blob), a=document.createElement("a");
     a.href=url; a.download=`asteria-survey-${state.participant_id}.json`; a.textContent="回答JSONをこの端末に保存する"; a.className="download-link"; return a;
   }
-  function submitToGas(payload) {
+  function submitToGas(payloadJson) {
     return new Promise((resolve,reject)=>{
       const endpoint=String(CONFIG.gasEndpoint||"").trim(); if(!endpoint){reject(new Error("GAS_ENDPOINT_NOT_CONFIGURED"));return;}
       const iframe=document.getElementById("gas-submit-target"), form=document.createElement("form"), nonce=uuid();
       form.method="POST"; form.action=endpoint; form.target="gas-submit-target"; form.style.display="none";
-      for (const [name,value] of [["payload",JSON.stringify(payload)],["nonce",nonce]]) { const input=document.createElement("input"); input.type="hidden"; input.name=name; input.value=value; form.appendChild(input); }
+      for (const [name,value] of [["payload",payloadJson],["nonce",nonce]]) { const input=document.createElement("input"); input.type="hidden"; input.name=name; input.value=value; form.appendChild(input); }
       document.body.appendChild(form);
       let done=false;
       const cleanup=()=>{window.removeEventListener("message",onMessage);form.remove();};
@@ -435,16 +511,31 @@
     });
   }
   function renderReview() {
-    state.current_screen="review"; saveState(state); setProgress("FINAL","SUBMIT",96);
+    state.current_screen = "review";
+    setProgress("FINAL", "SUBMIT", 96);
+
+    let payloadJson;
+    try {
+      payloadJson = getSubmissionPayloadJson();
+    } catch (error) {
+      card(`<h1 class="survey-title">回答を保存できませんでした</h1>
+        <p class="survey-lead">
+          ブラウザの保存領域を確認してください。
+          このサイトの保存データは削除せず、設定を確認してから
+          ページを再読み込みしてください。
+        </p>`);
+      return;
+    }
+
     const endpointReady=Boolean(String(CONFIG.gasEndpoint||"").trim());
     card(`<p class="survey-kicker">FINAL CHECK</p><h1 class="survey-title">回答の送信</h1><p class="survey-lead">すべての必須回答が完了しました。「回答を送信」を押すと回答が確定します。</p><div class="review-grid"><div class="review-card"><span>PARTICIPANT ID</span><strong>${escapeHtml(state.participant_id.slice(0,8))}…</strong></div><div class="review-card"><span>BASELINE</span><strong>${Object.keys(state.baseline).length} / 10 完了</strong></div><div class="review-card"><span>OUTFIT + FACTORS</span><strong>${Object.values(state.transform).filter(x=>x?.garment_factors).length} / 10 完了</strong></div><div class="review-card"><span>SURVEY VERSION</span><strong>${escapeHtml(state.survey_version)}</strong></div></div>${endpointReady?"":`<p class="submit-warning">GAS送信先URLが未設定です。公開前に <code>survey/survey-config.js</code> を設定してください。</p>`}<div id="fallback-download"></div><div class="survey-actions"><button class="survey-button" id="submit" ${(!endpointReady&&CONFIG.requireGasEndpointForFinalSubmit)?"disabled":""}>回答を送信</button></div>`);
-    if(!endpointReady) document.getElementById("fallback-download").appendChild(createLocalDownload(buildPayload()));
+    if(!endpointReady) document.getElementById("fallback-download").appendChild(createLocalDownload(payloadJson));
     document.getElementById("submit").addEventListener("click",async(event)=>{
       const button=event.currentTarget;
       if(Object.keys(state.baseline).length!==10||Object.values(state.transform).filter(x=>x?.garment_factors).length!==10){alert("必須回答が不足しています。");return;}
-      button.disabled=true;button.textContent="送信中…";state.completed_at=nowIso();saveState(state);const payload=buildPayload();
-      try{await submitToGas(payload);state.submitted_at=nowIso();state.current_screen="complete";markSubmittedAndClearDetailedState(state);render();}
-      catch(error){button.disabled=false;button.textContent="回答を送信";const holder=document.getElementById("fallback-download");holder.innerHTML=`<p class="submit-warning">送信を確認できませんでした。通信環境またはGAS設定を確認してください。</p>`;holder.appendChild(createLocalDownload(payload));}
+      button.disabled=true;button.textContent="送信中…";
+      try{await submitToGas(payloadJson);state.submitted_at=nowIso();state.current_screen="complete";markSubmittedAndClearDetailedState(state);render();}
+      catch(error){button.disabled=false;button.textContent="回答を送信";const holder=document.getElementById("fallback-download");holder.innerHTML=`<p class="submit-warning">送信を確認できませんでした。通信環境またはGAS設定を確認してください。</p>`;holder.appendChild(createLocalDownload(payloadJson));}
     });
   }
   function renderComplete() { setProgress("COMPLETE","THANK YOU",100); card(`<p class="survey-kicker">SURVEY COMPLETE</p><h1 class="survey-title">ご協力<br />ありがとうございました</h1><p class="survey-lead">回答の送信が完了しました。本調査では、キャラクターについて形成された印象、具体的な服装変換要因、衣装変化に対する心理反応とギャップ萌えとの関係を研究します。</p><div class="survey-note">このブラウザには再送防止のため、送信済み状態と参加者IDなど、再送防止に必要な最小限の情報だけが保存されています。</div>`); }
