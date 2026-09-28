@@ -12,6 +12,7 @@ wheels/
 # Local working data
 gap/
 private/
+candidate_outfits/
 
 # Archives
 *.tar.gz
