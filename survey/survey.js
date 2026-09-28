@@ -43,6 +43,13 @@
     ["F6", "肌の露出・身体の見せ方", "肌の見える範囲、身体のラインの強調など"],
     ["F7", "柄・素材感", "無地・柄物、柔らかさ、硬さ、光沢感など"]
   ];
+  const FACTOR_EFFECT_OPTIONS = [
+    [-2, "大きく弱めた"],
+    [-1, "少し弱めた"],
+    [0, "影響しなかった"],
+    [1, "少し高めた"],
+    [2, "大きく高めた"]
+  ];
 
   const VARIANTS = ["a", "b", "c"];
 
@@ -455,7 +462,7 @@
     if (!selected.length) { host.innerHTML = `<p class="survey-note">変化を感じた服装要素を1つ以上選択してください。該当しない場合は「特に変化を感じた要素はない」を選択してください。</p>`; return; }
     host.innerHTML = selected.map((id) => {
       const [,label] = GARMENT_FACTORS.find(([fid]) => fid === id);
-      return `<div class="factor-rating"><div class="factor-rating-head"><strong>${escapeHtml(label)}</strong><span>この要素の変化がギャップ萌えに与えた影響</span></div><div class="effect-scale">${[-2,-1,0,1,2].map(v=>`<div class="effect-option"><input type="radio" id="effect-${id}-${v}" name="effect-${id}" value="${v}" ${draftEffects[id] === v ? "checked" : ""} /><label for="effect-${id}-${v}">${v > 0 ? "+" : ""}${v}</label></div>`).join("")}</div><div class="effect-anchors"><span>−2 大きく弱めた</span><span>0 影響しなかった</span><span>＋2 大きく高めた</span></div></div>`;
+      return `<div class="factor-rating"><div class="factor-rating-head"><strong>${escapeHtml(label)}</strong><span>この要素の変化がギャップ萌えに与えた影響</span></div><div class="effect-scale">${FACTOR_EFFECT_OPTIONS.map(([value, text])=>`<div class="effect-option"><input type="radio" id="effect-${id}-${value}" name="effect-${id}" value="${value}" ${draftEffects[id] === value ? "checked" : ""} /><label for="effect-${id}-${value}"><span class="effect-option-value">${value > 0 ? "+" : ""}${value}</span><span class="effect-option-text">${text}</span></label></div>`).join("")}</div></div>`;
     }).join("");
   }
   function selectedFactors() {
@@ -466,7 +473,7 @@
   function renderFactorPhase(character, variant, transformedSrc, index) {
     renderComparisonCard(character, transformedSrc, `
       <div class="question-block"><p class="survey-kicker">GARMENT TRANSFORMATION FACTORS</p><h2>具体的に、服装のどの要素が変化したと感じましたか。</h2><p>先ほどの全体的な印象評価は確定済みです。ここでは、元の衣装と比較して変化を感じた服装要素をすべて選択してください。</p>${factorSelectorHtml()}</div>
-      <div class="question-block"><h2>選択した要素が「ギャップ萌え」に与えた影響を回答してください。</h2><p>変化が大きかったかではなく、その要素の変化がギャップ萌えを高めた／弱めた方向を評価してください。</p><div id="factor-ratings"></div></div>
+      <div class="question-block"><h2>選んだ服装の変化は、ギャップ萌えの感じ方にどう関わりましたか？</h2><p>その変化によって魅力を感じやすくなったか、感じにくくなったかを答えてください。<br />例：色が変わって、より魅力的に感じたら「高めた」。色は変わったが魅力の感じ方には関係なければ「影響しなかった」。</p><div id="factor-ratings"></div></div>
       <div class="survey-actions"><button class="survey-button" id="next">服装要因を確定して次のキャラクターへ</button></div>`);
     bindImageFallbacks();
     const none = document.getElementById("factor-none");
@@ -512,12 +519,29 @@
     });
   }
 
-  function characterOptions(selected) { return `<option value="">選択してください</option>${CHARACTERS.map((c)=>`<option value="${c.id}" ${selected===c.id?"selected":""}>${c.name}</option>`).join("")}<option value="none" ${selected==="none"?"selected":""}>特になし</option>`; }
+  function characterChoicesHtml(name, selected) {
+    return `<div class="character-choice-grid">${CHARACTERS.map((character) => {
+      const variant = state.transform[character.id]?.variant_id || state.assignment[character.id];
+      const transformedSrc = CONFIG.transformImagePath ? CONFIG.transformImagePath(character.id, variant) : `../assets/survey/transforms/${character.id}/${variant}.png`;
+      return `<label class="character-choice"><input type="radio" name="${name}" value="${escapeHtml(character.id)}" ${selected === character.id ? "checked" : ""} />
+        <span class="character-choice-body"><strong class="character-choice-name">${escapeHtml(character.name)}</strong>
+          <span class="character-choice-images"><span><span class="character-choice-photo character-choice-photo--face"><img src="${escapeHtml(`../${character.image}`)}" alt="${escapeHtml(character.name)}の元の姿" loading="lazy" /></span><small>元の姿（顔）</small></span><span><span class="character-choice-photo"><img src="${escapeHtml(transformedSrc)}" alt="${escapeHtml(character.name)}の衣装変更後の姿" loading="lazy" /></span><small>衣装変更後</small></span></span>
+        </span></label>`;
+    }).join("")}
+      <label class="character-choice character-choice--text"><input type="radio" name="${name}" value="none" ${selected === "none" ? "checked" : ""} /><span class="character-choice-body">特になし</span></label>
+      <label class="character-choice character-choice--text"><input type="radio" name="${name}" value="" ${!selected ? "checked" : ""} /><span class="character-choice-body">回答しない</span></label>
+    </div>`;
+  }
   function renderOpenResponse() {
     state.current_screen = "open-response"; saveState(state); setProgress("FINAL", "FREE RESPONSE", 91);
-    card(`<p class="survey-kicker">OPTIONAL / FREE RESPONSE</p><h1 class="survey-title">最後に、感じたことを<br />自由に教えてください</h1><p class="survey-lead">以下は任意回答です。</p><div class="form-section field-grid"><label class="field"><span>最も「ギャップ萌え」を感じたキャラクター</span><select id="strongest">${characterOptions(state.open_response.strongest_character)}</select><textarea id="strongest-reason" placeholder="どのような点にギャップ萌えを感じたか、よければ教えてください。">${escapeHtml(state.open_response.strongest_reason||"")}</textarea></label><label class="field"><span>印象の違いは感じたものの、ギャップ萌えにはつながらなかったキャラクター</span><select id="nongap">${characterOptions(state.open_response.nongap_character)}</select><textarea id="nongap-reason" placeholder="なぜギャップ萌えにはつながらなかったと感じたか、よければ教えてください。">${escapeHtml(state.open_response.nongap_reason||"")}</textarea></label></div><div class="survey-actions"><button class="survey-button" id="next">回答内容を確定</button></div>`);
+    card(`<p class="survey-kicker">OPTIONAL / FREE RESPONSE</p><h1 class="survey-title">最後に、感じたことを<br />自由に教えてください</h1><p class="survey-lead">以下は任意回答です。名前と画像を見比べて、当てはまるキャラクターを選んでください。</p>
+      <fieldset class="character-choice-section"><legend>最も「ギャップ萌え」を感じたキャラクター</legend>${characterChoicesHtml("strongest", state.open_response.strongest_character)}</fieldset>
+      <label class="field open-response-reason" for="strongest-reason"><span>選んだ理由（任意）</span><textarea id="strongest-reason" placeholder="どのような点にギャップ萌えを感じたか、よければ教えてください。">${escapeHtml(state.open_response.strongest_reason||"")}</textarea></label>
+      <fieldset class="character-choice-section"><legend>印象の違いは感じたものの、ギャップ萌えにはつながらなかったキャラクター</legend>${characterChoicesHtml("nongap", state.open_response.nongap_character)}</fieldset>
+      <label class="field open-response-reason" for="nongap-reason"><span>選んだ理由（任意）</span><textarea id="nongap-reason" placeholder="なぜギャップ萌えにはつながらなかったと感じたか、よければ教えてください。">${escapeHtml(state.open_response.nongap_reason||"")}</textarea></label>
+      <div class="survey-actions"><button class="survey-button" id="next">回答内容を確定</button></div>`);
     document.getElementById("next").addEventListener("click", () => {
-      state.open_response = { strongest_character:document.getElementById("strongest").value||null, strongest_reason:document.getElementById("strongest-reason").value.trim(), nongap_character:document.getElementById("nongap").value||null, nongap_reason:document.getElementById("nongap-reason").value.trim() };
+      state.open_response = { strongest_character:document.querySelector('input[name="strongest"]:checked')?.value||null, strongest_reason:document.getElementById("strongest-reason").value.trim(), nongap_character:document.querySelector('input[name="nongap"]:checked')?.value||null, nongap_reason:document.getElementById("nongap-reason").value.trim() };
       recordScreenExit("open-response"); state.current_screen = "review"; saveState(state); render();
     });
   }
@@ -573,7 +597,7 @@
     }
 
     const endpointReady=Boolean(String(CONFIG.gasEndpoint||"").trim());
-    card(`<p class="survey-kicker">FINAL CHECK</p><h1 class="survey-title">回答の送信</h1><p class="survey-lead">すべての必須回答が完了しました。「回答を送信」を押すと回答が確定します。</p><div class="review-grid"><div class="review-card"><span>PARTICIPANT ID</span><strong>${escapeHtml(state.participant_id.slice(0,8))}…</strong></div><div class="review-card"><span>BASELINE</span><strong>${Object.keys(state.baseline).length} / 10 完了</strong></div><div class="review-card"><span>OUTFIT + FACTORS</span><strong>${Object.values(state.transform).filter(x=>x?.garment_factors).length} / 10 完了</strong></div><div class="review-card"><span>SURVEY VERSION</span><strong>${escapeHtml(state.survey_version)}</strong></div></div>${endpointReady?"":`<p class="submit-warning">GAS送信先URLが未設定です。公開前に <code>survey/survey-config.js</code> を設定してください。</p>`}<div id="fallback-download"></div><div class="survey-actions"><button class="survey-button" id="submit" ${(!endpointReady&&CONFIG.requireGasEndpointForFinalSubmit)?"disabled":""}>回答を送信</button></div>`);
+    card(`<p class="survey-kicker">FINAL CHECK</p><h1 class="survey-title">回答の送信</h1><p class="survey-lead">すべての必須回答が完了しました。「回答を送信」を押すと回答が確定します。</p>${endpointReady?"":`<p class="submit-warning">GAS送信先URLが未設定です。公開前に <code>survey/survey-config.js</code> を設定してください。</p>`}<div id="fallback-download"></div><div class="survey-actions"><button class="survey-button" id="submit" ${(!endpointReady&&CONFIG.requireGasEndpointForFinalSubmit)?"disabled":""}>回答を送信</button></div>`);
     if(!endpointReady) document.getElementById("fallback-download").appendChild(createLocalDownload(payloadJson));
     document.getElementById("submit").addEventListener("click",async(event)=>{
       const button=event.currentTarget;
